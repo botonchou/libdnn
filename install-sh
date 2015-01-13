@@ -77,6 +77,7 @@ step_msg "looking for needed program"
 probe_need CFG_GIT git
 probe_need CFG_WGET wget
 probe_need CFG_UNZIP unzip
+probe_need CFG_MAKE make
 
 mkdir -p tools bin/ obj/
 
@@ -97,8 +98,8 @@ else
 fi
 
 # Make dependencies first
-cd tools/utility && make o3 && cd -
-cd tools/libcumatrix && make o3 && cd -
+cd tools/utility && $CFG_MAKE o3 && cd -
+cd tools/libcumatrix && $CFG_MAKE o3 && cd -
 
 # Make !!
-make o3
+$CFG_MAKE o3
