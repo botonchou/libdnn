@@ -1,5 +1,16 @@
 #!/bin/bash
 
+test_cmd() {
+    "$@"
+    local status=$?
+
+    if [ $status -ne 0 ] 
+    then err "are you using the gnu version?"
+    else msg "test $@ OK"
+    fi
+}
+
+
 msg() {
     echo "install-sh: $1"
 }
@@ -78,6 +89,10 @@ probe_need CFG_GIT git
 probe_need CFG_WGET wget
 probe_need CFG_UNZIP unzip
 probe_need CFG_MAKE make
+probe_need CFG_CTAGS ctags
+
+msg "testing ctags is gnu"
+test_cmd ctags -R
 
 mkdir -p tools bin/ obj/
 
