@@ -1,7 +1,7 @@
-CC=gcc
-CXX=g++
+include config.mk
+
+CFG_NVCC+= -arch=sm_21 -w #-Xcompiler "-Wall"
 CFLAGS=
-NVCC=nvcc -arch=sm_21 -w #-Xcompiler "-Wall"
 
 BOTON_UTIL_ROOT=tools/utility/
 CUMATRIX_ROOT=tools/libcumatrix/
@@ -43,7 +43,7 @@ o3: CFLAGS+=-O3
 o3: all
 debug: CFLAGS+=-g -DDEBUG
 debug: all
-dump_nrv: NVCC+=-Xcompiler "-fdump-tree-nrv" all
+dump_nrv: CFG_NVCC+=-Xcompiler "-fdump-tree-nrv" all
 dump_nrv: all
 
 vpath %.h include/
@@ -61,19 +61,19 @@ CUDA_LIBRARY=-lcuda -lcudart -lcublas
 LIBRARY_PATH=-L$(BOTON_UTIL_ROOT)/lib/ -L$(CUMATRIX_ROOT)/lib -L/usr/local/cuda/lib64
 
 $(EXECUTABLES): bin/% : $(OBJ) $(OBJDIR)/%.o
-	$(CXX) -o $@ $(CFLAGS) -std=c++0x $(INCLUDE) $^ $(LIBRARY_PATH) $(LIBRARY) $(CUDA_LIBRARY)
+	$(CFG_CXX) -o $@ $(CFLAGS) -std=c++0x $(INCLUDE) $^ $(LIBRARY_PATH) $(LIBRARY) $(CUDA_LIBRARY)
 
 # +==============================+
 # +===== Other Phony Target =====+
 # +==============================+
 $(OBJDIR)/%.o: %.cpp
-	$(CXX) $(CPPFLAGS) -std=c++0x -o $@ -c $<
+	$(CFG_CXX) $(CPPFLAGS) -std=c++0x -o $@ -c $<
 
 $(OBJDIR)/%.o: %.cu include/%.h
-	$(NVCC) $(CFLAGS) $(INCLUDE) -o $@ -c $<
+	$(CFG_NVCC) $(CFLAGS) $(INCLUDE) -o $@ -c $<
 
 $(OBJDIR)/%.d: %.cpp | $(OBJDIR)
-	@$(CXX) -MM $(CPPFLAGS) $< > $@.$$$$; \
+	@$(CFG_CXX) -MM $(CPPFLAGS) $< > $@.$$$$; \
 	sed 's,\($*\)\.o[ :]*,$(OBJDIR)/\1.o $@ : ,g' < $@.$$$$ > $@;\
 	rm -f $@.$$$$
 

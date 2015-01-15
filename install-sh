@@ -12,7 +12,7 @@ test_cmd() {
 
 
 msg() {
-    echo "install-sh: $1"
+    echo "configure: $1"
 }
 
 step_msg() {
@@ -22,11 +22,11 @@ step_msg() {
 }
 
 warn() {
-    echo "install-sh: WARNING: $1"
+    echo "configure: WARNING: $1"
 }
 
 err() {
-    echo "install-sh: error: $1"
+    echo "configure: error: $1"
     exit 1
 }
 
@@ -65,6 +65,7 @@ probe() {
     done
 
     eval $V=\$T
+    putvar $V "$VER"
 }
 
 probe_need() {
@@ -78,6 +79,30 @@ probe_need() {
     fi
 }
 
+putvar() {
+    local T
+    eval T=\$$1
+    eval TLEN=\${#$1}
+    if [ $TLEN -gt 35 ]
+    then
+        printf "configure: %-20s := %.35s ...\n" $1 "$T"
+    else
+        printf "configure: %-20s := %s %s\n" $1 "$T" "$2"
+    fi
+    printf "%-20s := %s\n" $1 "$T" >>config.tmp
+}
+
+move_if_changed() {
+    if cmp -s $1 $2
+    then
+        msg "leaving $2 unchanged"
+    else
+        msg "mv $1 $2"
+        mv -f $1 $2
+        chmod u-w $2 # make moved artifact read-only
+    fi
+}
+
 
 msg "looking for required commands"
 need_cmd mkdir
@@ -85,6 +110,9 @@ need_cmd printf
 
 step_msg "looking for needed program"
 
+probe_need CFG_CC gcc
+probe_need CFG_CXX g++
+probe_need CFG_NVCC nvcc
 probe_need CFG_GIT git
 probe_need CFG_WGET wget
 probe_need CFG_UNZIP unzip
@@ -94,11 +122,10 @@ probe_need CFG_CTAGS ctags
 msg "testing ctags is gnu"
 test_cmd ctags -R
 
-mkdir -p tools bin/ obj/
-
+mkdir -p tools/ bin/ obj/
 
 $CFG_WGET http://nchc.dl.sourceforge.net/project/rapidxml/rapidxml/rapidxml%201.13/rapidxml-1.13.zip -P tools/
-cd tools/ && unzip rapidxml-1.13.zip && cd -
+$CFG_UNZIP -o tools/rapidxml-1.13.zip -d tools
 
 if [ "$1" == "--zip-only" ]; then
   $CFG_WGET https://codeload.github.com/botonchou/utility/zip/master -O tools/utility.zip
@@ -113,5 +140,10 @@ else
 fi
 
 
-# Make !!
-$CFG_MAKE o3
+move_if_changed config.tmp config.mk
+rm -f config.tmp
+
+
+msg "libdnn configuration complete"
+step_msg "please type 'make' to build the library"
+
