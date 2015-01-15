@@ -103,6 +103,16 @@ move_if_changed() {
     fi
 }
 
+copy_if_changed() {
+    if cmp -s $1 $2
+    then
+        msg "leaving $2 unchanged"
+    else
+        msg "cp $1 $2"
+        cp -f $1 $2
+        chmod u-w $2 # make copied artifact read-only
+    fi
+}
 
 msg "looking for required commands"
 need_cmd mkdir
@@ -140,10 +150,10 @@ else
 fi
 
 
+copy_if_changed Makefile.in ./Makefile
 move_if_changed config.tmp config.mk
 rm -f config.tmp
 
 
 msg "libdnn configuration complete"
 step_msg "please type 'make' to build the library"
-
