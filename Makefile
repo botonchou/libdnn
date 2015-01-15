@@ -82,4 +82,6 @@ $(OBJDIR)/%.d: %.cpp | $(OBJDIR)
 ctags:
 	@if command -v ctags >/dev/null 2>&1; then ctags -R --langmap=C:+.cu *; fi
 clean:
+	$(MAKE) clean -C tools/libcumatrix/
+	$(MAKE) clean -C tools/utility/
 	rm -rf $(EXECUTABLES) $(OBJDIR)/*

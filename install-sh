@@ -112,9 +112,6 @@ else
   $CFG_GIT clone https://github.com/botonchou/libcumatrix.git tools/libcumatrix
 fi
 
-# Make dependencies first
-cd tools/utility && $CFG_MAKE o3 && cd -
-cd tools/libcumatrix && $CFG_MAKE o3 && cd -
 
 # Make !!
 $CFG_MAKE o3
