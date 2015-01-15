@@ -13,3 +13,4 @@ example/*.xml
 example/model/*.xml
 *.dat
 log
+config.mk
