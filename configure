@@ -200,7 +200,7 @@ mkdir -p tools/ bin/ obj/
 $CFG_WGET http://nchc.dl.sourceforge.net/project/rapidxml/rapidxml/rapidxml%201.13/rapidxml-1.13.zip -P tools/
 $CFG_UNZIP -o tools/rapidxml-1.13.zip -d tools
 
-#$CFG_GIT submodule update --init --recursive
+$CFG_GIT submodule update --init --recursive
 
 #if [ "$1" == "--zip-only" ]; then
   #$CFG_WGET https://codeload.github.com/botonchou/utility/zip/master -O tools/utility.zip
