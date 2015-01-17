@@ -97,4 +97,4 @@ clean:
 
 # Dummy make test for travis-ci
 test:
-	$(shell pwd)
+	$(shell exit 0)
