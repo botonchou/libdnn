@@ -2,6 +2,8 @@ libdnn 中文說明
 ======
 (See English version below)
 
+[![Build Status](https://travis-ci.org/MnO2/libdnn.svg?branch=master)](https://travis-ci.org/MnO2/libdnn)
+
 [libdnn](https://github.com/botonchou/libdnn) 是一個輕量、好讀、人性化的**深層學習**函式庫。由 C++ 和 CUDA 撰寫而成，目的是讓開發人員、研究人員、或任何有興趣的人都可以輕鬆體驗並駕馭深層學習所帶來的威力。
 
 詳細的教學和使用說明，請參考[Wiki](https://github.com/botonchou/libdnn/wiki)
