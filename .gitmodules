@@ -1,0 +1,6 @@
+[submodule "tools/libcumatrix"]
+	path = tools/libcumatrix
+	url = https://github.com/MnO2/libcumatrix.git
+[submodule "tools/utility"]
+	path = tools/utility
+	url = https://github.com/MnO2/utility.git

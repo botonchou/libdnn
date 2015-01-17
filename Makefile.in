@@ -1,3 +1,5 @@
+BASEPROJ?=$(shell pwd)
+
 include config.mk
 
 CFG_NVCC+= -arch=sm_21 -w #-Xcompiler "-Wall"
@@ -35,9 +37,14 @@ EXECUTABLES=nn-train\
 
 EXECUTABLES:=$(addprefix bin/, $(EXECUTABLES))
 
-.PHONY: debug all o3 dump_nrv ctags clean
+.PHONY: debug all o3 dump_nrv ctags clean depndencies
 
-all: $(EXECUTABLES) ctags
+all: dependencies $(EXECUTABLES) ctags
+
+dependencies:
+	$(MAKE) -C tools/libcumatrix/ BASEPROJ=$(BASEPROJ)
+	$(MAKE) -C tools/utility/ BASEPROJ=$(BASEPROJ)
+
 
 o3: CFLAGS+=-O3
 o3: all
@@ -58,7 +65,7 @@ $(OBJDIR):
 
 LIBRARY=-lpbar -lcumatrix
 CUDA_LIBRARY=-lcuda -lcudart -lcublas
-LIBRARY_PATH=-L$(BOTON_UTIL_ROOT)/lib/ -L$(CUMATRIX_ROOT)/lib -L/usr/local/cuda/lib64
+LIBRARY_PATH=-L$(BOTON_UTIL_ROOT)/lib/ -L$(CUMATRIX_ROOT)/lib -L$(CFG_CUDA_LIBPATH)
 
 $(EXECUTABLES): bin/% : $(OBJ) $(OBJDIR)/%.o
 	$(CFG_CXX) -o $@ $(CFLAGS) -std=c++0x $(INCLUDE) $^ $(LIBRARY_PATH) $(LIBRARY) $(CUDA_LIBRARY)
@@ -81,7 +88,8 @@ $(OBJDIR)/%.d: %.cpp | $(OBJDIR)
 
 ctags:
 	@if command -v ctags >/dev/null 2>&1; then ctags -R --langmap=C:+.cu *; fi
+
 clean:
-	$(MAKE) clean -C tools/libcumatrix/
-	$(MAKE) clean -C tools/utility/
+	$(MAKE) clean -C tools/libcumatrix/ BASEPROJ=$(BASEPROJ)
+	$(MAKE) clean -C tools/utility/ BASEPROJ=$(BASEPROJ)
 	rm -rf $(EXECUTABLES) $(OBJDIR)/*
