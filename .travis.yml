@@ -16,6 +16,7 @@ install:
 
 before_script:
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
+  - export PATH=$PATH:/usr/local/cuda/bin
 
 script: $SCRIPTS/travis_build_and_test.sh
 

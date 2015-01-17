@@ -37,7 +37,7 @@ EXECUTABLES=nn-train\
 
 EXECUTABLES:=$(addprefix bin/, $(EXECUTABLES))
 
-.PHONY: debug all o3 dump_nrv ctags clean depndencies
+.PHONY: debug all o3 dump_nrv ctags clean depndencies test
 
 all: dependencies $(EXECUTABLES) ctags
 
@@ -93,3 +93,8 @@ clean:
 	$(MAKE) clean -C tools/libcumatrix/ BASEPROJ=$(BASEPROJ)
 	$(MAKE) clean -C tools/utility/ BASEPROJ=$(BASEPROJ)
 	rm -rf $(EXECUTABLES) $(OBJDIR)/*
+
+
+# Dummy make test for travis-ci
+test:
+	$(shell pwd)
