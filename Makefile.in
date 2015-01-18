@@ -5,8 +5,8 @@ include config.mk
 CFG_NVCC+= -arch=sm_21 -w #-Xcompiler "-Wall"
 CFLAGS=
 
-BOTON_UTIL_ROOT=tools/utility/
-CUMATRIX_ROOT=tools/libcumatrix/
+BOTON_UTIL_ROOT=tools/utility
+CUMATRIX_ROOT=tools/libcumatrix
 
 INCLUDE= -I ./ \
 	 -I include/ \
