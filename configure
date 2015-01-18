@@ -12,7 +12,7 @@ test_cmd() {
 
 
 msg() {
-    echo "configure: $1"
+    echo "$CFG_SELF: $1"
 }
 
 step_msg() {
@@ -22,11 +22,11 @@ step_msg() {
 }
 
 warn() {
-    echo "configure: WARNING: $1"
+    echo "$CFG_SELF: WARNING: $1"
 }
 
 err() {
-    echo "configure: error: $1"
+    echo "$CFG_SELF: error: $1"
     exit 1
 }
 
@@ -85,9 +85,9 @@ putvar() {
     eval TLEN=\${#$1}
     if [ $TLEN -gt 35 ]
     then
-        printf "configure: %-20s := %.35s ...\n" $1 "$T"
+        printf "$CFG_SELF: %-20s := %.35s ...\n" $1 "$T"
     else
-        printf "configure: %-20s := %s %s\n" $1 "$T" "$2"
+        printf "$CFG_SELF: %-20s := %s %s\n" $1 "$T" "$2"
     fi
     printf "%-20s := %s\n" $1 "$T" >>config.tmp
 }
@@ -114,6 +114,97 @@ copy_if_changed() {
     fi
 }
 
+
+validate_opt () {
+    for arg in $CFG_CONFIGURE_ARGS
+    do
+        isArgValid=0
+        for option in $BOOL_OPTIONS
+        do
+            if test --disable-$option = $arg
+            then
+                isArgValid=1
+            fi
+            if test --enable-$option = $arg
+            then
+                isArgValid=1
+            fi
+        done
+        for option in $VAL_OPTIONS
+        do
+            if echo "$arg" | grep -q -- "--$option="
+            then
+                isArgValid=1
+            fi
+        done
+        if [ "$arg" = "--help" ]
+        then
+            echo
+            echo "No more help available for Configure options,"
+            echo "check the Wiki or join our IRC channel"
+            break
+        else
+            if test $isArgValid -eq 0
+            then
+                err "Option '$arg' is not recognized"
+            fi
+        fi
+    done
+}
+
+
+opt_core() {
+    BOOL_OPTIONS="$BOOL_OPTIONS $2"
+
+    local SAVE=$1
+    local OP=$2
+    local DEFAULT=$3
+    shift
+    shift
+    shift
+    local DOC="$*"
+    local FLAG=""
+
+    if [ $DEFAULT -eq 0 ]
+    then
+        FLAG="enable"
+    else
+        FLAG="disable"
+        DOC="don't $DOC"
+    fi
+
+    if [ $HELP -eq 0 ]
+    then
+        for arg in $CFG_CONFIGURE_ARGS
+        do
+            if [ "$arg" = "--${FLAG}-${OP}" ]
+            then
+                OP=$(echo $OP | tr 'a-z-' 'A-Z_')
+                FLAG=$(echo $FLAG | tr 'a-z' 'A-Z')
+                local V="CFG_${FLAG}_${OP}"
+                eval $V=1
+                if [ "$SAVE" = "save" ]
+                then
+                   putvar $V
+                fi
+            fi
+        done
+    else
+        if [ ! -z "$META" ]
+        then
+            OP="$OP=<$META>"
+        fi
+        printf "    --%-30s %s\n" "$FLAG-$OP" "$DOC"
+     fi
+}
+
+opt_nosave() {
+    opt_core nosave "$@"
+}
+
+opt() {
+    opt_core save "$@"
+}
 
 CFG_OSTYPE=$(uname -s)
 CFG_CPUTYPE=$(uname -m)
@@ -144,6 +235,50 @@ then
 fi
 
 
+
+DEFAULT_BUILD="${CFG_CPUTYPE}-${CFG_OSTYPE}"
+
+CFG_SRC_DIR="$(cd $(dirname $0) && pwd)/"
+CFG_BUILD_DIR="$(pwd)/"
+CFG_SELF="$0"
+CFG_CONFIGURE_ARGS="$@"
+
+OPTIONS=""
+HELP=0
+if [ "$1" = "--help" ]
+then
+    HELP=1
+    shift
+    echo
+    echo "Usage: $CFG_SELF [options]"
+    echo
+    echo "Options:"
+    echo
+else
+    msg "recreating config.tmp"
+    echo '' >config.tmp
+
+    step_msg "processing $CFG_SELF args"
+fi
+
+BOOL_OPTIONS=""
+VAL_OPTIONS=""
+
+opt ccache 0 "invoke gcc/clang via ccache to reuse object files between builds"
+
+
+if [ $HELP -eq 1 ]
+then
+    echo
+    exit 0
+fi
+
+# Validate Options
+step_msg "validating $CFG_SELF args"
+validate_opt
+
+
+
 msg "looking for required commands"
 need_cmd mkdir
 need_cmd printf
@@ -157,6 +292,8 @@ probe_need CFG_UNZIP unzip
 probe_need CFG_MAKE make
 probe_need CFG_CTAGS ctags
 
+probe CFG_CCACHE ccache
+
 
 if [ $CFG_OSTYPE = apple-darwin ]
 then
@@ -167,16 +304,16 @@ then
         step_msg "on OS X 10.9, g++ is an alias of clang. Which is not good since CUDA is only compatible with g++, trying to probe other path instead"
 
         #probe for homebrew installed g++-4.9
-        probe_need CFG_CC gcc-4.9
-        probe_need CFG_CXX g++-4.9
+        probe_need CFG_GCC gcc-4.9
+        probe_need CFG_GCXX g++-4.9
 
     else
         if [ $(g++ --version 2>&1 | grep -c ' 4\.[0-6]') -ne 0 ]; then
             err "older g++ found, please install a newer version of gcc"
         fi
 
-        probe_need CFG_CC gcc
-        probe_need CFG_CXX g++
+        probe_need CFG_GCC gcc
+        probe_need CFG_GCXX g++
     fi
     
     CFG_CUDA_LIBPATH=/usr/local/cuda/lib
@@ -184,8 +321,8 @@ then
 
 elif [ $CFG_OSTYPE = unknown-linux-gnu ]
 then
-    probe_need CFG_CC gcc
-    probe_need CFG_CXX g++
+    probe_need CFG_GCC gcc
+    probe_need CFG_GCXX g++
 
     CFG_CUDA_LIBPATH=/usr/local/cuda/lib64
     putvar CFG_CUDA_LIBPATH
@@ -194,6 +331,30 @@ fi
 
 msg "testing ctags is gnu"
 test_cmd ctags -R
+
+
+if [ ! -z "$CFG_ENABLE_CCACHE" ]
+then
+    if [ -z "$CFG_CC" ]
+    then
+        if [ -z "$CFG_CCACHE" ]
+        then
+            err "ccache requested but not found"
+        fi
+
+        CFG_CC="ccache $CFG_GCC"
+        CFG_CXX="ccache $CFG_GCXX"
+    else
+        CFG_CC=$CFG_GCC
+        CFG_CXX=$CFG_GCXX
+    fi
+else
+    CFG_CC=$CFG_GCC
+    CFG_CXX=$CFG_GCXX
+fi
+
+putvar CFG_CC
+putvar CFG_CXX
 
 mkdir -p tools/ bin/ obj/
 
