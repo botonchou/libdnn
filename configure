@@ -1,0 +1,385 @@
+#!/bin/bash
+
+test_cmd() {
+    "$@"
+    local status=$?
+
+    if [ $status -ne 0 ] 
+    then err "are you using the gnu version?"
+    else msg "test $@ OK"
+    fi
+}
+
+
+msg() {
+    echo "$CFG_SELF: $1"
+}
+
+step_msg() {
+    msg
+    msg "$1"
+    msg
+}
+
+warn() {
+    echo "$CFG_SELF: WARNING: $1"
+}
+
+err() {
+    echo "$CFG_SELF: error: $1"
+    exit 1
+}
+
+need_cmd() {
+    if command -v $1 >/dev/null 2>&1
+    then msg "found $1"
+    else err "need $1"
+    fi
+}
+
+
+probe() {
+    local V=$1
+    shift
+    local P
+    local T
+
+    for P
+    do
+        T=$(command -v $P 2>&1)
+        if [ $? -eq 0 ]
+        then
+            VER0=$($P --version 2>/dev/null | head -1 \
+                |  sed -e 's/[^0-9]*\([vV]\?[0-9.]\+[^ ]*\).*/\1/' )
+            if [ $? -eq 0 -a "x${VER0}" != "x" ]
+            then
+              VER="($VER0)"
+            else
+              VER=""
+            fi
+            break
+        else
+            VER=""
+            T=""
+        fi
+    done
+
+    eval $V=\$T
+    putvar $V "$VER"
+}
+
+probe_need() {
+    local V=$1
+    probe $*
+    eval VV=\$$V
+
+    if [ -z "$VV" ] 
+    then
+        err "needed, but unable to find any of: $*"
+    fi
+}
+
+putvar() {
+    local T
+    eval T=\$$1
+    eval TLEN=\${#$1}
+    if [ $TLEN -gt 35 ]
+    then
+        printf "$CFG_SELF: %-20s := %.35s ...\n" $1 "$T"
+    else
+        printf "$CFG_SELF: %-20s := %s %s\n" $1 "$T" "$2"
+    fi
+    printf "%-20s := %s\n" $1 "$T" >>config.tmp
+}
+
+move_if_changed() {
+    if cmp -s $1 $2
+    then
+        msg "leaving $2 unchanged"
+    else
+        msg "mv $1 $2"
+        mv -f $1 $2
+        chmod u-w $2 # make moved artifact read-only
+    fi
+}
+
+copy_if_changed() {
+    if cmp -s $1 $2
+    then
+        msg "leaving $2 unchanged"
+    else
+        msg "cp $1 $2"
+        cp -f $1 $2
+        chmod u-w $2 # make copied artifact read-only
+    fi
+}
+
+
+validate_opt () {
+    for arg in $CFG_CONFIGURE_ARGS
+    do
+        isArgValid=0
+        for option in $BOOL_OPTIONS
+        do
+            if test --disable-$option = $arg
+            then
+                isArgValid=1
+            fi
+            if test --enable-$option = $arg
+            then
+                isArgValid=1
+            fi
+        done
+        for option in $VAL_OPTIONS
+        do
+            if echo "$arg" | grep -q -- "--$option="
+            then
+                isArgValid=1
+            fi
+        done
+        if [ "$arg" = "--help" ]
+        then
+            echo
+            echo "No more help available for Configure options,"
+            echo "check the Wiki or join our IRC channel"
+            break
+        else
+            if test $isArgValid -eq 0
+            then
+                err "Option '$arg' is not recognized"
+            fi
+        fi
+    done
+}
+
+
+opt_core() {
+    BOOL_OPTIONS="$BOOL_OPTIONS $2"
+
+    local SAVE=$1
+    local OP=$2
+    local DEFAULT=$3
+    shift
+    shift
+    shift
+    local DOC="$*"
+    local FLAG=""
+
+    if [ $DEFAULT -eq 0 ]
+    then
+        FLAG="enable"
+    else
+        FLAG="disable"
+        DOC="don't $DOC"
+    fi
+
+    if [ $HELP -eq 0 ]
+    then
+        for arg in $CFG_CONFIGURE_ARGS
+        do
+            if [ "$arg" = "--${FLAG}-${OP}" ]
+            then
+                OP=$(echo $OP | tr 'a-z-' 'A-Z_')
+                FLAG=$(echo $FLAG | tr 'a-z' 'A-Z')
+                local V="CFG_${FLAG}_${OP}"
+                eval $V=1
+                if [ "$SAVE" = "save" ]
+                then
+                   putvar $V
+                fi
+            fi
+        done
+    else
+        if [ ! -z "$META" ]
+        then
+            OP="$OP=<$META>"
+        fi
+        printf "    --%-30s %s\n" "$FLAG-$OP" "$DOC"
+     fi
+}
+
+opt_nosave() {
+    opt_core nosave "$@"
+}
+
+opt() {
+    opt_core save "$@"
+}
+
+CFG_OSTYPE=$(uname -s)
+CFG_CPUTYPE=$(uname -m)
+
+
+case $CFG_OSTYPE in
+    Linux)
+        CFG_OSTYPE=unknown-linux-gnu
+        ;;
+    Darwin)
+        CFG_OSTYPE=apple-darwin
+        ;;
+    MSYS*)
+        CFG_OSTYPE=pc-windows-gnu
+        ;;
+    *)
+        err "unknown OS type: $CFG_OSTYPE"
+        ;;
+esac
+
+
+if [ $CFG_OSTYPE = apple-darwin -a $CFG_CPUTYPE = i386 ]
+then
+    if sysctl hw.optional.x86_64 | grep -q ': 1'
+    then
+        CFG_CPUTYPE=x86_64
+    fi
+fi
+
+
+
+DEFAULT_BUILD="${CFG_CPUTYPE}-${CFG_OSTYPE}"
+
+CFG_SRC_DIR="$(cd $(dirname $0) && pwd)/"
+CFG_BUILD_DIR="$(pwd)/"
+CFG_SELF="$0"
+CFG_CONFIGURE_ARGS="$@"
+
+OPTIONS=""
+HELP=0
+if [ "$1" = "--help" ]
+then
+    HELP=1
+    shift
+    echo
+    echo "Usage: $CFG_SELF [options]"
+    echo
+    echo "Options:"
+    echo
+else
+    msg "recreating config.tmp"
+    echo '' >config.tmp
+
+    step_msg "processing $CFG_SELF args"
+fi
+
+BOOL_OPTIONS=""
+VAL_OPTIONS=""
+
+opt ccache 0 "invoke gcc/clang via ccache to reuse object files between builds"
+
+
+if [ $HELP -eq 1 ]
+then
+    echo
+    exit 0
+fi
+
+# Validate Options
+step_msg "validating $CFG_SELF args"
+validate_opt
+
+
+
+msg "looking for required commands"
+need_cmd mkdir
+need_cmd printf
+
+step_msg "looking for needed program"
+
+probe_need CFG_NVCC nvcc
+probe_need CFG_GIT git
+probe_need CFG_WGET wget
+probe_need CFG_UNZIP unzip
+probe_need CFG_MAKE make
+probe_need CFG_CTAGS ctags
+
+probe CFG_CCACHE ccache
+
+
+if [ $CFG_OSTYPE = apple-darwin ]
+then
+    CFG_OSX_GCC_VERSION=$(g++ --version 2>&1 | grep "Apple LLVM version")
+
+    if [ $? -eq 0 ]
+    then
+        step_msg "on OS X 10.9, g++ is an alias of clang. Which is not good since CUDA is only compatible with g++, trying to probe other path instead"
+
+        #probe for homebrew installed g++-4.9
+        probe_need CFG_GCC gcc-4.9
+        probe_need CFG_GCXX g++-4.9
+
+    else
+        if [ $(g++ --version 2>&1 | grep -c ' 4\.[0-6]') -ne 0 ]; then
+            err "older g++ found, please install a newer version of gcc"
+        fi
+
+        probe_need CFG_GCC gcc
+        probe_need CFG_GCXX g++
+    fi
+    
+    CFG_CUDA_LIBPATH=/usr/local/cuda/lib
+    putvar CFG_CUDA_LIBPATH
+
+elif [ $CFG_OSTYPE = unknown-linux-gnu ]
+then
+    probe_need CFG_GCC gcc
+    probe_need CFG_GCXX g++
+
+    CFG_CUDA_LIBPATH=/usr/local/cuda/lib64
+    putvar CFG_CUDA_LIBPATH
+fi
+
+
+msg "testing ctags is gnu"
+test_cmd ctags -R
+
+
+if [ ! -z "$CFG_ENABLE_CCACHE" ]
+then
+    if [ -z "$CFG_CC" ]
+    then
+        if [ -z "$CFG_CCACHE" ]
+        then
+            err "ccache requested but not found"
+        fi
+
+        CFG_CC="ccache $CFG_GCC"
+        CFG_CXX="ccache $CFG_GCXX"
+    else
+        CFG_CC=$CFG_GCC
+        CFG_CXX=$CFG_GCXX
+    fi
+else
+    CFG_CC=$CFG_GCC
+    CFG_CXX=$CFG_GCXX
+fi
+
+putvar CFG_CC
+putvar CFG_CXX
+
+mkdir -p tools/ bin/ obj/
+
+$CFG_WGET http://nchc.dl.sourceforge.net/project/rapidxml/rapidxml/rapidxml%201.13/rapidxml-1.13.zip -P tools/
+$CFG_UNZIP -o tools/rapidxml-1.13.zip -d tools
+
+$CFG_GIT submodule update --init --recursive
+
+#if [ "$1" == "--zip-only" ]; then
+  #$CFG_WGET https://codeload.github.com/botonchou/utility/zip/master -O tools/utility.zip
+  #$CFG_UNZIP tools/utility.zip -d tools/ && mv tools/utility-master tools/utility
+
+  #$CFG_WGET https://codeload.github.com/botonchou/libcumatrix/zip/master -O tools/libcumatrix.zip
+  #$CFG_UNZIP tools/libcumatrix.zip -d tools/ && mv tools/libcumatrix-master tools/libcumatrix 
+#else
+  #printf "\33[34m[Info]\33[0m You can specify \33[33m--zip-only\33[0m if git clone is too slow\n"
+  #$CFG_GIT clone https://github.com/botonchou/utility.git tools/utility
+  #$CFG_GIT clone https://github.com/botonchou/libcumatrix.git tools/libcumatrix
+#fi
+
+
+copy_if_changed Makefile.in ./Makefile
+move_if_changed config.tmp config.mk
+rm -f config.tmp
+
+
+msg "libdnn configuration complete"
+step_msg "please type 'make' to build the library"

@@ -1,6 +1,5 @@
 obj/*
 bin/*
-tools/*
 data/*.model
 others/*
 latex/*
@@ -13,3 +12,6 @@ example/*.xml
 example/model/*.xml
 *.dat
 log
+config.mk
+Makefile
+tools/rapidxml*
