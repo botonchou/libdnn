@@ -13,16 +13,11 @@
 // limitations under the License.
 
 #include <feature-transform.h>
+using namespace std;
 
 // CSE stands for Check Stream Error
 #define CSE(x) { if (!(x)) \
   throw std::runtime_error(RED_ERROR + "Failed when executing \33[33m"#x"\33[0m"); }
-
-#define VECTOR std::vector
-#define WHERE std
-#include <operators.inl>
-#undef VECTOR
-#undef WHERE
 
 std::map<FeatureTransform::Type, string> FeatureTransform::type2token = {
   {FeatureTransform::Affine, "Affine"},
@@ -484,24 +479,21 @@ string Dropout::toString() const {
 }
 
 void Dropout::feedForward(mat& fout, const mat& fin) {
-  if (!_dropout) {
-    fout = fin * (1 - _dropout_ratio);
-    return;
-  }
-
-  if (_dropout_ratio == 0) {
+  if (!_dropout or _dropout_ratio == 0) {
     fout = fin;
     return;
   }
 
-  _dropout_mask = mat(fin.getRows(), fin.getCols(), 1 - _dropout_ratio);
+  float r = 1 - _dropout_ratio;
+  _dropout_mask = mat(fin.getRows(), fin.getCols(), r);
   sample(_dropout_mask, BERNOULLI);
-  fout = _dropout_mask & fin;
+  fout = (_dropout_mask & fin) * (1 / r);
 }
 
 void Dropout::backPropagate(mat& error, const mat& fin, const mat& fout, float learning_rate) {
+  float r = 1 - _dropout_ratio;
   if (_dropout_ratio != 0)
-    error &= _dropout_mask;
+    error &= _dropout_mask * (1 / r);
 }
 
 /*!
@@ -536,7 +528,7 @@ void MIMOFeatureTransform::read(xml_node<> *node) {
 void MIMOFeatureTransform::write(ostream& os) const {
   char buffer[256];
   sprintf(buffer, "input-dim=\"%lux%lu\" input-maps=\"%lu\" output-maps=\"%lu\"",
-      _input_img_size.m, _input_img_size.n, _n_input_maps, _n_output_maps);
+      _input_img_size.height, _input_img_size.width, _n_input_maps, _n_output_maps);
   os << buffer;
 }
 
@@ -614,9 +606,9 @@ void ConvolutionalLayer::read(xml_node<> *node) {
     for (auto w = kernels->first_node("weight"); w; w = w->next_sibling(), i++) {
       stringstream ss(w->value());
 
-      hmat hw(k.m, k.n);
-      for (size_t x=0; x<k.m; ++x)
-	for (size_t y=0; y<k.n; ++y)
+      hmat hw(k.height, k.width);
+      for (size_t x=0; x<k.height; ++x)
+	for (size_t y=0; y<k.width; ++y)
 	  CSE( ss >> hw(x, y) );
 
       _kernels[i][j] = (mat) hw;
@@ -662,120 +654,14 @@ string ConvolutionalLayer::toString() const {
   return type2token[FeatureTransform::Convolution];
 }
 
-/* FIXME If every element in fins is a single feature map, then only a data can
- *      be fed forward through this function.
- *      NOTE that fins.size()  == # of input feature maps
- *                             != # of data in a batch
- *
- *	To feed forward a whole batch in a single function:
- *                fins.size()  == # of input feature maps
- *		  fins[i].rows == map.rows x map.cols
- *		  fins[i].cols == # of data
- *
- *	That is fins.size() is still the # of input feature maps (, which is
- *      always inevitable). However, in the i-th element of fins (i.e. fins[i])
- *	, there're multiple input feature maps comes from multiple training data.
- * */
-
-void ConvolutionalLayer::feedForward(mat& fout, const mat& fin) {
-
-  auto fins = versplit(fin, getNumInputMaps());
-
-  size_t nInputs  = getNumInputMaps(),
-	 nOutputs = getNumOutputMaps();
-
-  if (fins.size() != nInputs)
-    throw std::runtime_error(RED_ERROR + "Number of inputs maps ( = "
-	+ to_string(fins.size()) + ") does not match number of kernels ( = "
-	+ to_string(nInputs) + ").");
-
-  size_t batch_size = fins[0].getCols();
-
-  SIZE s = get_output_img_size();
-
-  vector<mat> fouts(nOutputs);
-
-  for (size_t j=0; j<nOutputs; ++j)
-    fouts[j].resize(s.m * s.n, batch_size, _bias[j]);
-
-  for (size_t j=0; j<nOutputs; ++j) {
-    for (size_t i=0; i<nInputs; ++i)
-      fouts[j] += convn(fins[i], _kernels[i][j], _input_img_size, VALID_SHM);
-  }
-
-  fout = vercat(fouts);
-}
-
-void ConvolutionalLayer::feedBackward(mat& error, const mat& delta) {
-
-  vector<mat> deltas = versplit(delta, getNumOutputMaps());
-
-  // Since nInputs == nOutputs for subsampling layer, I just use N.
-  size_t nInputs = getNumInputMaps(),
-	 nOutputs = getNumOutputMaps();
-
-  SIZE s = this->get_input_img_size();
-  size_t batch_size = deltas[0].getCols();
-
-  vector<mat> errors(nInputs);
-
-  for (size_t i=0; i<nInputs; ++i)
-    errors[i].resize(s.m * s.n, batch_size, 0);
-
-  for (size_t i=0; i<nInputs; ++i)
-    for (size_t j=0; j<nOutputs; ++j)
-      errors[i] += convn(deltas[j], rot180(_kernels[i][j]), this->get_output_img_size(), FULL_SHM);
-
-  error = vercat(errors);
-}
-
-// NOTE: in MATLAB
-// xcorr2 stands for 2D cross-correlation
-// (I don't know why MATLAB does not have "xcorrn" for n-dimensional xcorr)
-// The following operation are theoretically equivalent:
-// (with only some trivial numerical error)
-// (1)  convn(x, rot180(h)) == xcorr2(x, h)
-//     xcorr2(x, rot180(h)) ==  convn(x, h)
-// (2) convn(rot180(x), h) == rot180(convn(x, rot180(h)))
-//     ^
-//     |_____ which is obviously faster
-
 void ConvolutionalLayer::backPropagate(mat& error, const mat& fin,
     const mat& fout, float learning_rate) {
 
-  size_t batch_size = fin.getCols();
-  size_t nInputs = getNumInputMaps();
-  size_t nOutputs = getNumOutputMaps();
+  auto delta = error * learning_rate;
 
-  // In the following codes, the iteration index i and j stands for
-  // i : # of input  features. i = 0 ~ nInputs - 1 
-  // j : # of output features. j = 0 ~ nOutputs - 1
-
-  vector<mat> deltas = versplit(error * learning_rate, nOutputs);
-
-  this->feedBackward(error, mat(error) );
-
-  // iImgs represents the input images.
-  vector<vector<mat> > iImgs(nInputs);
-  vector<mat> fins = versplit(fin, nInputs);
-
-  for (size_t i=0; i<nInputs; ++i)
-    iImgs[i] = reshapeVectors2Images(fins[i], _input_img_size);
-
-  auto Y = reshapeVectors2Images(vercat(deltas), SIZE(deltas[0].getRows(), nOutputs));
-
-  // Update kernels with learning rate
-  vector<mat> Z(nInputs, mat(this->get_kernel_size().area(), nOutputs, 0));
-
-  for (size_t i=0; i<nInputs; ++i)
-    for (size_t k=0; k<batch_size; ++k)
-      Z[i] += convn_2(rot180(iImgs[i][k]), Y[k], this->get_output_img_size());
-
-  for (size_t i=0; i<nInputs; ++i)
-    _kernels[i] -= reshapeVectors2Images(Z[i], this->get_kernel_size());
-
-  for (size_t j=0; j<nOutputs; ++j)
-    _bias[j] -= sum_all(deltas[j]);
+  this->feedBackward(error, mat(error));
+  this->update_kernel(fin, delta);
+  this->update_bias(delta);
 }
 
 size_t ConvolutionalLayer::getInputDimension() const {
@@ -860,30 +746,8 @@ SIZE SubSamplingLayer::get_output_img_size() const {
   return _input_img_size / _scale;
 }
 
-void SubSamplingLayer::feedForward(mat& fout, const mat& fin) {
-
-  vector<mat> fins = versplit(fin, getNumInputMaps());
-
-  vector<mat> fouts(fins.size());
-  for (size_t i=0; i<fouts.size(); ++i)
-    fouts[i] = downsample(fins[i], _scale, _input_img_size);
-
-  fout = vercat(fouts);
-}
-
-void SubSamplingLayer::feedBackward(mat& error, const mat& delta) {
-
-  vector<mat> deltas = versplit(delta, getNumOutputMaps());
-
-  vector<mat> errors(deltas.size());
-  for (size_t i=0; i<errors.size(); ++i)
-    errors[i] = upsample(deltas[i], _input_img_size, get_output_img_size());
-
-  error = vercat(errors);
-}
-
 void SubSamplingLayer::backPropagate(mat& error, const mat& fin,
     const mat& fout, float learning_rate) {
   // Copy errors element by element to deltas
-  this->feedBackward(error, error);
+  this->feedBackward(error, mat(error));
 }

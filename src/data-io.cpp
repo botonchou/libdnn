@@ -19,6 +19,7 @@
 #include <cassert>
 
 #define CFRE(x) { if (x == 0) throw std::runtime_error(RED_ERROR + "Failed when read features. "); }
+#define DEBUG_STR(x) ("\33[33m"#x"\33[0m = " + to_string(x) + "\t")
 
 /* \brief Factory method for class DataStream
  *
@@ -142,10 +143,15 @@ BatchData BasicStream::readSparseFeature(int N, size_t dim, size_t base) {
       if (pos == string::npos)
 	continue;
 
-      size_t j = stof(token.substr(0, pos)) - 1;
+      size_t j = stof(token.substr(0, pos));
+
+      if (j == 0)
+	throw std::runtime_error(RED_ERROR + "Index in sparse format should"
+	    " be started from 1 instead of 0. ( like 1:... not 0:... )");
+
       float value = stof(token.substr(pos + 1));
 
-      data.x(i, j) = value;
+      data.x(i, j - 1) = value;
     }
   
     // FIXME I'll remove it and move this into DNN. Since bias is only need by DNN,
@@ -252,20 +258,25 @@ KaldiStream& KaldiStream::operator = (KaldiStream that) {
 
 void KaldiStream::init(size_t start, size_t end) {
 
-  printf("Reading feature from \33[33m\"%s\"\33[0m\n", this->get_feature_command().c_str());
-  printf("Reading label from \33[33m\"%s\"\33[0m\n", this->get_label_command().c_str());
+  clog << "Reading feature from \33[33m\"" << this->get_feature_command() << "\"\33[0m" << endl;
+  clog << "Reading label from \33[33m\"" << this->get_label_command() << "\"\33[0m" << endl;
 
   // Use wc to count # of features
-  string wc_count_lines = this->get_feature_command() +
-    "| feat-to-len --print-args=false ark:- ark,t:- | cut -f 2 -d ' '";
-  FILE* fid = popen(wc_count_lines.c_str(), "r");
+  // "| feat-to-len --print-args=false ark:- ark,t:- | cut -f 2 -d ' '";
+  string wc_count_words = this->get_label_command() + "| cut -f 2- -d ' ' | wc -w";
 
-  int x;
-  while (fscanf(fid, "%d", &x) == 1) DataStream::_size += x;
+  FILE* fid = popen(wc_count_words.c_str(), "r");
+  if (fscanf(fid, "%lu", &(DataStream::_size)) != 1)
+    throw std::runtime_error(RED_ERROR + "Failed to count number of labels");
   pclose(fid);
 
+  clog << util::blue("[Info]") << " Found " << util::green(to_string(DataStream::_size))
+       << " labels in \"" << this->get_label_command() << "\"" << endl;
+
   _ffid = popen(this->get_feature_command().c_str(), "r");
-  _lfid = popen(this->get_label_command().c_str(), "r");
+
+  if (! (this->get_label_command().empty()) )
+    _lfid = popen(this->get_label_command().c_str(), "r");
 }
 
 DataStream* KaldiStream::clone() const {
@@ -289,16 +300,19 @@ BatchData KaldiStream::read(int N, size_t dim, size_t base) {
     if (r == 0) {
       string uid1, uid2;
       uid1 = read_uid(fis);
-      uid2 = read_uid(lis);
 
-      if (uid1.empty() or uid2.empty()) {
-	this->rewind();
-	uid1 = read_uid(fis);
+      if (lis != nullptr) {
 	uid2 = read_uid(lis);
-      }
 
-      if (uid1 != uid2)
-	throw std::runtime_error(RED_ERROR + "uid1 != uid2 (\"" + uid1 + "\" != \"" + uid2 + "\")");
+	if (uid1.empty() or uid2.empty()) {
+	  this->rewind();
+	  uid1 = read_uid(fis);
+	  uid2 = read_uid(lis);
+	}
+
+	if (uid1 != uid2)
+	  throw std::runtime_error(RED_ERROR + "uid1 != uid2 (\"" + uid1 + "\" != \"" + uid2 + "\")");
+      }
 
       char s[6]; 
       int frame;
@@ -322,9 +336,11 @@ BatchData KaldiStream::read(int N, size_t dim, size_t base) {
 	CFRE(fread((void*) &data.x(counter, j), sizeof(float), 1, fis));
       data.x(counter, dim) = 1;
 
-      size_t y;
-      CFRE(fscanf(lis, "%lu", &y));
-      data.y[counter] = y;
+      if (lis != nullptr) {
+	size_t y;
+	CFRE(fscanf(lis, "%lu", &y));
+	data.y[counter] = y;
+      }
 
       if (++counter == N) {
 	r -= i + 1;
@@ -342,8 +358,11 @@ void KaldiStream::rewind() {
   pclose(_ffid);
   _ffid = popen(this->get_feature_command().c_str(), "r");
 
-  pclose(_lfid);
-  _lfid = popen(this->get_label_command().c_str(), "r");
+  if (_lfid != nullptr)
+    pclose(_lfid);
+
+  if (! (this->get_label_command().empty()) )
+    _lfid = popen(this->get_label_command().c_str(), "r");
   
   this->_remained = 0;
 }
@@ -351,8 +370,8 @@ void KaldiStream::rewind() {
 string KaldiStream::get_feature_command() const {
   size_t pos = DataStream::_filename.find_first_of(",");
 
-  if (pos == string::npos)
-    throw runtime_error(RED_ERROR + "Please specify feature and label like ark:feat.ark,label.ark");
+  /*if (pos == string::npos)
+    throw runtime_error(RED_ERROR + "Please specify feature and label like ark:feat.ark,label.ark");*/
 
   return DataStream::_filename.substr(4, pos - 4);
 }
@@ -360,10 +379,13 @@ string KaldiStream::get_feature_command() const {
 string KaldiStream::get_label_command() const {
   size_t pos = DataStream::_filename.find_first_of(",");
 
-  if (pos == string::npos)
-    throw runtime_error(RED_ERROR + "Please specify feature and label like ark:feat.ark,label.ark");
+  /*if (pos == string::npos)
+    throw runtime_error(RED_ERROR + "Please specify feature and label like ark:feat.ark,label.ark");*/
 
-  return DataStream::_filename.substr(pos + 1);
+  if (pos == string::npos)
+    return "";
+  else
+    return DataStream::_filename.substr(pos + 1);
 }
 
 void swap(KaldiStream& a, KaldiStream& b) {
@@ -377,15 +399,16 @@ void swap(KaldiStream& a, KaldiStream& b) {
  *
  * */
 size_t count_lines(const string& fn) {
-  printf("Loading file: \33[32m%s\33[0m (try to find out how many data) ...", fn.c_str());
-  fflush(stdout);
+
+  clog << "Loading file: \33[32m" << fn << "\33[0m (try to find out how many data) ...";
+  clog.flush();
   
   std::ifstream fin(fn.c_str()); 
   size_t N = std::count(std::istreambuf_iterator<char>(fin), 
       std::istreambuf_iterator<char>(), '\n');
   fin.close();
 
-  printf("\t\33[32m[Done]\33[0m\n");
+  clog << "\t\33[32m[Done]\33[0m" << endl;
   return N;
 }
 
