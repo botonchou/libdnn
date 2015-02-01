@@ -1,6 +1,6 @@
 CC=gcc
 CXX=g++
-CFLAGS=-fPIC -std=c++11 #-Werror -Wall
+CFLAGS=-fPIC -std=c++0x #-Werror -Wall
 LFLAGS_BIN=
 LFLAGS_LIB=-shared
 NVCC=nvcc -arch=sm_21 -w #-Xcompiler "-Wall"
